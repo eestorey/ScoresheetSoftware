@@ -1,6 +1,6 @@
 # Test files that contain sensitive data
-.pdf
-.csv
+*.pdf
+*.csv
 
 # Environments
 .venv/
