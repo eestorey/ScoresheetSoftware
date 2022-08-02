@@ -2,80 +2,76 @@
 """
 Created on Sun Feb  7 19:58:14 2021
 
-@author: Midnight
+@author: Emily Storey
 
-This is a program that I am using to practice python, and also to replace my 
-score sheet software that I built in matlab... Because $$. One of the main 
-goals of this software is to get compensated by the club. Because $$. 
+Note to self: Programming this is a virtual environment. To enable: 
+$ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process; 
+$ .venv\scripts\activate
+
+This is a program that I am using to replace the GTA Brews score 
+sheet software that I built in matlab... 
 
 ---
     
 """
-
-# Import the modules
+# Import modules
+from dotenv import load_dotenv
+import numpy as np
+import os
+import pandas as pd
+from pdf2image import convert_from_path
+import pytesseract
+import re                                       # regex
 import tkinter as tk
 import tkinter.filedialog as fd
-# from PIL import Image, ImageOps
-import pytesseract
-# import sys
-from pdf2image import convert_from_path
-# import os
-import numpy as np
-import re
-import pandas as pd
 
-# Make sure the program can find the tesseract OCR path
-pytesseract.pytesseract.tesseract_cmd = r'C:\Users\Midnight\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
+load_dotenv()
+TESSERACT_OCR_PATH = os.getenv('TESSERACT_OCR_PATH')
+ENTRY_TRACKING_FILE = os.getenv('ENTRY_TRACKING_FILE')
 
-#%% Set things up, import the csv of all entries and initialize a data structure for checking if entry was received, renamed.
+# Declare tesseract OCR path. Put this location in an ENV file eventually...
+pytesseract.pytesseract.tesseract_cmd = TESSERACT_OCR_PATH
 
-# Import a list of all entries to a pandas dataframe. 
-dfOld = pd.read_csv('Brew_Slam_2019_Entries_All_All_11-20-2019.csv', delimiter=',')
+df_entries = pd.read_csv(ENTRY_TRACKING_FILE, delimiter=',')
 
-# Then make a new dataframe with columns: JudgingNumber, Received, Renamed.
-dfNew = pd.DataFrame([dfOld['Received'], dfOld['Judging Number']])
-dfNew = dfNew.T
-dfNew.insert(2, 'Renamed', 0)
+# Get the paths of files to be processed. Store them. 
+working_directory = os.getcwd()
+file_list = [file for file in os.listdir() if re.findall(r'.pdf$', file)]
 
-
-#%% Convert PDFs to images and crop them to area
-
-# Get the paths of files to be processed. Store in an array named fileList
-root = tk.Tk()
-fileList = fd.askopenfilenames(parent=root, title='Select PDFs', filetypes=[('pdf file', '*.pdf')])
-
-# For each PDF, convert into images. 
-for thisFile in len(fileList):
-    pages = convert_from_path(fileList[thisFile], 500, grayscale=True)
-    entryNums = ['', '']
-    for thisPage in len(pages):
-        # For each page, crop to where the judge and entry stickers are, and do OCR.
-        judgeImage = pages[thisPage].crop((100, 750, 1800, 1300))
-        textJudge = str(((pytesseract.image_to_string(judgeImage))))
-        entryImage = pages[thisPage].crop((1800, 750, 3500, 1300))
-        textEntry = str(((pytesseract.image_to_string(entryImage))))
+# For each PDF, convert into images. Perform OCR. Do stuff if there is/isn't a match between pages on the pdf.
+for this_file in file_list:
+    pages = convert_from_path(working_directory + '\\' + this_file, 500, grayscale=True)
+    potential_entry_numbers = []
+    for this_page in pages:
+        # For each page, crop to where the stickers are, and do OCR.
+        entry_sticker = this_page.crop((1800, 750, 3500, 1300))
+        entry_text = str(((pytesseract.image_to_string(entry_sticker))))
         
         # Try finding the entry number, based on its expected pattern.
-        judgingNo = re.findall(r'[MC\d]\d\-\d\d\d', textEntry)
-        if judgingNo == []:
-            # look in the other location in case the stickers are swapped
-            judgingNo = re.findall(r'[MC\d]\d\-\d\d\d', textJudge)
-        if judgingNo != []:
-            # If it successfully found an entry number, store it. 
-            entryNums[thisPage] = judgingNo[0]
+        entry_number = re.findall(r'[MC\d]\d\-\d\d\d', entry_text)
+        if entry_number == []:
+            # look in the judge sticker location in case the stickers are swapped
+            judge_sticker = this_page.crop((100, 750, 1800, 1300))
+            judge_text = str(((pytesseract.image_to_string(judge_sticker))))
+            entry_number = re.findall(r'[MC\d]\d\-\d\d\d', judge_text)
+        if entry_number != []:
+            # If an entry number was found, store it. 
+            potential_entry_numbers.append(entry_number[0].upper())
         
-    if entryNums[0] == entryNums[1]:
-        # if both entry numbers agree, great! Find the row index in the data frame. Make sure case insensitive.
-        temp = dfNew['Judging Number'].str.lower().isin([entryNums[0].lower()])
-        row = list(dfNew['Judging Number'][temp].index)
-        
-        # Up the counter in the associated row of the renamed column by 1. 
-        # This will allow us to catch duplicate renamings.
-        dfNew['Renamed'][row[0]] = dfNew['Renamed'][row[0]] + 1
-        
-        "A value is trying to be set on a copy of a slice from a DataFrame"
+    if np.unique(potential_entry_numbers).size == 1:
+        # Find the row index in the data frame. 
+        row = df_entries[df_entries['Judging Number'].str.contains(potential_entry_numbers[0])]
 
-        "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy"
-        
-    else:
+        # Do something to short circuit if that entry number is not found for some reason... 
+        # Otherwise, increase the value in the 'Renamed' column of the appropriate row of the df. 
+        # The goal of this is to ensure we are catching duplicate renamings which may occur. 
+        if row.size: 
+            os.rename(this_file, potential_entry_numbers[0] + '.pdf')
+            df_entries.loc[row.index[0], 'Renamed'] += 1
+        # else :
+            # do something if the entry number is not found in the csv file
+    # else: 
+        # do something if the entry numbers between pages of the pdf do not agree. 
+
+df_entries.to_csv(ENTRY_TRACKING_FILE, index = False, sep = ',')
         
