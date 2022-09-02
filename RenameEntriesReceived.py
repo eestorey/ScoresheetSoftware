@@ -13,7 +13,7 @@ This is a program that I am using to replace the GTA Brews score
 sheet software that I built in matlab... 
 
 Stuff that is still to do... 
-1) write another file to deal with the ENTRY_TRACKING_FILE after all is completed. Look for things that got missed or renamed twice. 
+1) write another file to deal with the ENTRY_TRACKING_FILE after all is completed. Look for things that got missed.
 4) write a README. 
 5) make a 'gemfile' https://stackoverflow.com/questions/19280249/python-equivalent-of-a-ruby-gem-file https://fuzzyblog.io/blog/python/2019/09/10/building-a-python-requirements-txt-file.html
 
@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 import numpy as np
 import os
 import pandas as pd
+from pathlib import Path
 from pdf2image import convert_from_path
 import pytesseract
 from PyPDF2 import PdfFileWriter, PdfFileReader
@@ -73,7 +74,7 @@ for i in range(len(pages)):
     if entry_number != []:
         # If an entry number was found, update the corresponding row in the df and add its page number.
         row = df_entries[df_entries['Judging Number'].str.contains(entry_number[0].upper())]
-        df_entries.loc[row.index[0], 'Renamed'] += 1
+        # df_entries.loc[row.index[0], 'Renamed'] += 1
 
         if pd.isna(df_entries.loc[row.index[0], 'Pagenumber']):
             df_entries.loc[row.index[0], 'Pagenumber'] = [i]
@@ -83,47 +84,47 @@ for i in range(len(pages)):
 # once all of the pages have been gone through, filter the df to remove rows where pagenumber is na
 df_withpages = df_entries.dropna()
 
-# for each row in df_withpages, in a 'results' folder, write new pdfs of the pages indicated.
+# for each row in df_withpages, in a 'Results-Success' folder, write new pdfs of the pages indicated.
 inputpdf = PdfFileReader(open(working_directory + '\\' + JUDGING_PDF_FILE, "rb"))
 
 # Look for missing page numbers. Write to a text file with the missing ones. 
-pgs_should_exist = set(range(1, inputpdf.numPages + 1))
-pgs_got_matched = set(np.array(sum(df_withpages['Pagenumber'].tolist(), [])) + 1)
+pgs_should_exist = set(range(inputpdf.numPages))
+pgs_got_matched = set(sum(df_withpages['Pagenumber'].tolist(), []))
 pgs_missing_matches = list(pgs_should_exist - pgs_got_matched)
 
 with open('pages_missing_matches.txt', 'w') as outfile:
     if pgs_missing_matches != []:
-        outfile.writelines((str(i)+'\n' for i in pgs_missing_matches))
+        outfile.writelines('Pages not matched to an entry\n')
+        outfile.writelines((str(i+1)+'\n' for i in pgs_missing_matches))
     else: 
         outfile.writelines('All pages in the pdf were matched to an entry')
 
+# Write each file that succeeded to a separate pdf in a new folder.
+Path(working_directory + '\\Results-Success\\').mkdir(parents=True, exist_ok=True)
 for i in range(df_withpages.shape[0]) :
     row = df_withpages.iloc[i]
     output = PdfFileWriter()
     for j in range(len(row['Pagenumber'])) :
         output.addPage(inputpdf.getPage(row['Pagenumber'][j]))
-    with open(row['Judging Number'] + '.pdf', 'wb') as outputStream:
+    with open(working_directory + '\\Results-Success\\' + row['Judging Number'] + '.pdf', 'wb') as outputStream:
         output.write(outputStream)
-            
-            
+
+# Write each page that failed to a separate pdf in a new folder.
+Path(working_directory + '\\Results-Fail\\').mkdir(parents=True, exist_ok=True)
+for i in pgs_missing_matches :
+    output = PdfFileWriter()
+    output.addPage(inputpdf.getPage(i))
+    with open(working_directory + '\\Results-Fail\\' + 'page-%s.pdf' % (i+1), 'wb') as outputStream:
+        output.write(outputStream)
+
+# deal with the df_entries file. Flag entries that do not have exactly 2 pages found. 
+# Somehow incorporate the digital stuff in here... find out how many pages I should have...
+
+# step 1: filter for nan in the pagenumber column and write to a file 'Entries_Not_Found'
 
 
 
-    
-# # if np.unique(potential_entry_numbers).size == 1:
-# #     # Find the row index in the data frame. 
-# #     row = df_entries[df_entries['Judging Number'].str.contains(potential_entry_numbers[0])]
-
-# #     # Do something to short circuit if that entry number is not found for some reason... 
-# #     # Otherwise, increase the value in the 'Renamed' column of the appropriate row of the df. 
-# #     # The goal of this is to ensure we are catching duplicate renamings which may occur. 
-# #     if row.size: 
-# #         os.rename(this_file, potential_entry_numbers[0] + '.pdf')
-# #         df_entries.loc[row.index[0], 'Renamed'] += 1
-#     # else :
-#         # do something if the entry number is not found in the csv file
-# # else: 
-#     # do something if the entry numbers between pages of the pdf do not agree. 
+# step 2: cross reference the digital list.
 
 # df_entries.to_csv(ENTRY_TRACKING_FILE, index = False, sep = ',')
         
