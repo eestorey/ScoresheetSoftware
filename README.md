@@ -5,4 +5,4 @@ Use OCR to automate renaming of GTA Brews Competition Scoresheets
 
 - Specify paths in the `.env` file. 
 - Entry tracking file is a csv  with columns received (1/0), judging number (char), digital evaluations (blank), pagenumber (blank).
-- 
+- Some sort of a df of previously submitted digital evaluations is needed.
