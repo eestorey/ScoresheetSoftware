@@ -1,6 +1,8 @@
 # Test files that contain sensitive data
 *.pdf
 *.csv
+*.htm
+.Ignore/
 
 # Result files that get written
 *.txt

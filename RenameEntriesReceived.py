@@ -36,6 +36,7 @@ import re
 load_dotenv()
 TESSERACT_OCR_PATH = os.getenv('TESSERACT_OCR_PATH')
 ENTRY_TRACKING_FILE = os.getenv('ENTRY_TRACKING_FILE')
+DIGITAL_EVALUATION_FILE = os.getenv('DIGITAL_EVALUATION_FILE')
 JUDGING_PDF_FILE = os.getenv('JUDGING_PDF_FILE')
 
 PDF_IMAGE_RESOLUTION = int(os.getenv('PDF_IMAGE_RESOLUTION'))
@@ -64,12 +65,12 @@ for i in range(len(pages)):
     entry_text = str(((pytesseract.image_to_string(entry_sticker))))
     
     # Try finding the entry number, based on its expected pattern.
-    entry_number = re.findall(r'[MC\d]\d\-\d\d\d', entry_text)
+    entry_number = re.findall(r'[MCls\d]\d\-\d\d\d', entry_text)
     if entry_number == []:
         # look in the judge sticker location in case the stickers are swapped
         judge_sticker = this_page.crop(judge_pixel_location)
         judge_text = str(((pytesseract.image_to_string(judge_sticker))))
-        entry_number = re.findall(r'[MC\d]\d\-\d\d\d', judge_text)
+        entry_number = re.findall(r'[MCls\d]\d\-\d\d\d', judge_text)
 
     if entry_number != []:
         # If an entry number was found, update the corresponding row in the df and add its page number.
@@ -99,6 +100,7 @@ with open('pages_missing_matches.txt', 'w') as outfile:
     else: 
         outfile.writelines('All pages in the pdf were matched to an entry')
 
+# Source for pdf split https://stackoverflow.com/a/490203
 # Write each file that succeeded to a separate pdf in a new folder.
 Path(working_directory + '\\Results-Success\\').mkdir(parents=True, exist_ok=True)
 for i in range(df_withpages.shape[0]) :
@@ -117,14 +119,41 @@ for i in pgs_missing_matches :
     with open(working_directory + '\\Results-Fail\\' + 'page-%s.pdf' % (i+1), 'wb') as outputStream:
         output.write(outputStream)
 
+
+
+
+
+### BELOW THIS POINT SHOULD REALLY BE ITS OWN FILE... 
+
+
+
+
 # deal with the df_entries file. Flag entries that do not have exactly 2 pages found. 
-# Somehow incorporate the digital stuff in here... find out how many pages I should have...
 
-# step 1: filter for nan in the pagenumber column and write to a file 'Entries_Not_Found'
+# Load the digital evaluations list. Needs to be cleaned up because HTML tables... 
+df_evaluations = pd.read_csv(DIGITAL_EVALUATION_FILE, delimiter=',').dropna(how = 'all').query('`Number` != "Number"').fillna(method = 'pad')
+df_evaluations = df_evaluations[df_evaluations['Notes'].str.contains('Submitted|submitted')]
 
+# add a column for digital evaluations, tally up how many are already in the system. 
+def numSubmitted(row):
+    if re.search('Submitted: (\d)', row['Notes']):
+        return int(re.search('Submitted: (\d)', row['Notes']).group(1))
+    else:
+        return 0
+df_evaluations['Evaluations Submitted'] = df_evaluations.apply(lambda row: numSubmitted(row), axis = 1)
 
+# left join to put digital evaluations on the entries df. 
+df_entries = df_entries.merge(
+    df_evaluations[['Number', 'Evaluations Submitted']], 
+    left_on = 'Judging Number', right_on = 'Number', how = 'left'
+    )
 
-# step 2: cross reference the digital list.
+# tally up number of pages found in ocr, and how many total entries (btwn digita/analog)
+df_entries['Pages Found'] = df_entries['Pagenumber'].str.len()
+df_entries['Total Evaluations'] = df_entries['Pages Found'] + df_entries['Evaluations Submitted']
 
-# df_entries.to_csv(ENTRY_TRACKING_FILE, index = False, sep = ',')
+# flag entries that don't have exactly 2 evaluations between digital and analog. 
+df_entries[df_entries['Total Evaluations'] != 2].to_csv('entries_without_2_evaluations.csv', index = False, sep = ',')
+
+df_entries[['Received', 'Judging Number', 'Pagenumber', 'Evaluations Submitted', 'Pages Found', 'Total Evaluations']].to_csv(ENTRY_TRACKING_FILE, index = False, sep = ',')
         
