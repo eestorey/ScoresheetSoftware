@@ -5,13 +5,19 @@ Created on Sun Feb  7 19:58:14 2021
 @author: Emily Storey
 
 Note to self: Programming this is a virtual environment. To enable: 
-$ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process; 
-$ .venv\scripts\activate
+$ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process; .venv\scripts\activate
+
+Another note to self... instead of $ pip list etc do $ python -m pip list. IDK why the former isn't working it gives this https://stackoverflow.com/questions/37220055/pip-fatal-error-in-launcher-unable-to-create-process-using
 
 This is a program that I am using to replace the GTA Brews score 
 sheet software that I built in matlab... 
 
----
+Stuff that is still to do... 
+1) write another file to deal with the ENTRY_TRACKING_FILE after all is completed. Look for things that got missed or renamed twice. 
+4) write a README. 
+5) make a 'gemfile' https://stackoverflow.com/questions/19280249/python-equivalent-of-a-ruby-gem-file https://fuzzyblog.io/blog/python/2019/09/10/building-a-python-requirements-txt-file.html
+
+
     
 """
 # Import modules
@@ -21,57 +27,103 @@ import os
 import pandas as pd
 from pdf2image import convert_from_path
 import pytesseract
+from PyPDF2 import PdfFileWriter, PdfFileReader
 import re
-import tkinter as tk
-import tkinter.filedialog as fd
+# import tkinter as tk
+# import tkinter.filedialog as fd
 
 load_dotenv()
 TESSERACT_OCR_PATH = os.getenv('TESSERACT_OCR_PATH')
 ENTRY_TRACKING_FILE = os.getenv('ENTRY_TRACKING_FILE')
+JUDGING_PDF_FILE = os.getenv('JUDGING_PDF_FILE')
 
-# Declare tesseract OCR path. Put this location in an ENV file eventually...
+PDF_IMAGE_RESOLUTION = int(os.getenv('PDF_IMAGE_RESOLUTION'))
+
+# Set a 4-tuple defining the left, upper, right, and lower coordinate 
+# of the sticker crop box (inches) (assumes 8.5x11 pagesize). Convert to pixels.
+sticker_pixel_location = tuple(np.array([3.6, 1.5, 7, 2.6]) * PDF_IMAGE_RESOLUTION)
+judge_pixel_location = tuple(np.array([0.2, 1.5, 3.6, 2.6]) * PDF_IMAGE_RESOLUTION)
+
+# Declare tesseract OCR path.
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_OCR_PATH
 
 df_entries = pd.read_csv(ENTRY_TRACKING_FILE, delimiter=',')
+df_entries['Pagenumber'] = df_entries['Pagenumber'].astype('object')
 
-# Get the paths of files to be processed. Store them. 
+# Convert the pdf into images for iterating
 working_directory = os.getcwd()
-file_list = [file for file in os.listdir() if re.findall(r'.pdf$', file)]
+pages = convert_from_path(working_directory + '\\' + JUDGING_PDF_FILE, PDF_IMAGE_RESOLUTION, grayscale=True)
 
-# For each PDF, convert into images. Perform OCR. Do stuff if there is/isn't a match between pages on the pdf.
-for this_file in file_list:
-    pages = convert_from_path(working_directory + '\\' + this_file, 500, grayscale=True)
-    potential_entry_numbers = []
-    for this_page in pages:
-        # For each page, crop to where the stickers are, and do OCR.
-        entry_sticker = this_page.crop((1800, 750, 3500, 1300))
-        entry_text = str(((pytesseract.image_to_string(entry_sticker))))
-        
-        # Try finding the entry number, based on its expected pattern.
-        entry_number = re.findall(r'[MC\d]\d\-\d\d\d', entry_text)
-        if entry_number == []:
-            # look in the judge sticker location in case the stickers are swapped
-            judge_sticker = this_page.crop((100, 750, 1800, 1300))
-            judge_text = str(((pytesseract.image_to_string(judge_sticker))))
-            entry_number = re.findall(r'[MC\d]\d\-\d\d\d', judge_text)
-        if entry_number != []:
-            # If an entry number was found, store it. 
-            potential_entry_numbers.append(entry_number[0].upper())
-        
-    if np.unique(potential_entry_numbers).size == 1:
-        # Find the row index in the data frame. 
-        row = df_entries[df_entries['Judging Number'].str.contains(potential_entry_numbers[0])]
+# For each page in the PDF, perform OCR. Update the tracking file to match entry number with page number.
+for i in range(len(pages)):
+    this_page = pages[i]
 
-        # Do something to short circuit if that entry number is not found for some reason... 
-        # Otherwise, increase the value in the 'Renamed' column of the appropriate row of the df. 
-        # The goal of this is to ensure we are catching duplicate renamings which may occur. 
-        if row.size: 
-            os.rename(this_file, potential_entry_numbers[0] + '.pdf')
-            df_entries.loc[row.index[0], 'Renamed'] += 1
-        # else :
-            # do something if the entry number is not found in the csv file
-    # else: 
-        # do something if the entry numbers between pages of the pdf do not agree. 
+    # For each page, crop to where the stickers are, and do OCR.
+    entry_sticker = this_page.crop(sticker_pixel_location)
+    entry_text = str(((pytesseract.image_to_string(entry_sticker))))
+    
+    # Try finding the entry number, based on its expected pattern.
+    entry_number = re.findall(r'[MC\d]\d\-\d\d\d', entry_text)
+    if entry_number == []:
+        # look in the judge sticker location in case the stickers are swapped
+        judge_sticker = this_page.crop(judge_pixel_location)
+        judge_text = str(((pytesseract.image_to_string(judge_sticker))))
+        entry_number = re.findall(r'[MC\d]\d\-\d\d\d', judge_text)
 
-df_entries.to_csv(ENTRY_TRACKING_FILE, index = False, sep = ',')
+    if entry_number != []:
+        # If an entry number was found, update the corresponding row in the df and add its page number.
+        row = df_entries[df_entries['Judging Number'].str.contains(entry_number[0].upper())]
+        df_entries.loc[row.index[0], 'Renamed'] += 1
+
+        if pd.isna(df_entries.loc[row.index[0], 'Pagenumber']):
+            df_entries.loc[row.index[0], 'Pagenumber'] = [i]
+        else: 
+            df_entries.loc[row.index[0], 'Pagenumber'].append(i)
+
+# once all of the pages have been gone through, filter the df to remove rows where pagenumber is na
+df_withpages = df_entries.dropna()
+
+# for each row in df_withpages, in a 'results' folder, write new pdfs of the pages indicated.
+inputpdf = PdfFileReader(open(working_directory + '\\' + JUDGING_PDF_FILE, "rb"))
+
+# Look for missing page numbers. Write to a text file with the missing ones. 
+pgs_should_exist = set(range(1, inputpdf.numPages + 1))
+pgs_got_matched = set(np.array(sum(df_withpages['Pagenumber'].tolist(), [])) + 1)
+pgs_missing_matches = list(pgs_should_exist - pgs_got_matched)
+
+with open('pages_missing_matches.txt', 'w') as outfile:
+    if pgs_missing_matches != []:
+        outfile.writelines((str(i)+'\n' for i in pgs_missing_matches))
+    else: 
+        outfile.writelines('All pages in the pdf were matched to an entry')
+
+for i in range(df_withpages.shape[0]) :
+    row = df_withpages.iloc[i]
+    output = PdfFileWriter()
+    for j in range(len(row['Pagenumber'])) :
+        output.addPage(inputpdf.getPage(row['Pagenumber'][j]))
+    with open(row['Judging Number'] + '.pdf', 'wb') as outputStream:
+        output.write(outputStream)
+            
+            
+
+
+
+    
+# # if np.unique(potential_entry_numbers).size == 1:
+# #     # Find the row index in the data frame. 
+# #     row = df_entries[df_entries['Judging Number'].str.contains(potential_entry_numbers[0])]
+
+# #     # Do something to short circuit if that entry number is not found for some reason... 
+# #     # Otherwise, increase the value in the 'Renamed' column of the appropriate row of the df. 
+# #     # The goal of this is to ensure we are catching duplicate renamings which may occur. 
+# #     if row.size: 
+# #         os.rename(this_file, potential_entry_numbers[0] + '.pdf')
+# #         df_entries.loc[row.index[0], 'Renamed'] += 1
+#     # else :
+#         # do something if the entry number is not found in the csv file
+# # else: 
+#     # do something if the entry numbers between pages of the pdf do not agree. 
+
+# df_entries.to_csv(ENTRY_TRACKING_FILE, index = False, sep = ',')
         

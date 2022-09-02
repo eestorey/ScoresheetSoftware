@@ -2,6 +2,9 @@
 *.pdf
 *.csv
 
+# Result files that get written
+*.txt
+
 # Environments
 .venv/
 .env
