@@ -21,6 +21,7 @@ Stuff that is still to do...
 """
 # Import modules
 from dotenv import load_dotenv
+import easygui as eg
 import numpy as np
 import os
 import pandas as pd
@@ -29,8 +30,6 @@ from pdf2image import convert_from_path
 import pytesseract
 from PyPDF2 import PdfFileWriter, PdfFileReader
 import re
-# import tkinter as tk
-# import tkinter.filedialog as fd
 
 load_dotenv()
 TESSERACT_OCR_PATH = os.getenv('TESSERACT_OCR_PATH')
@@ -55,28 +54,56 @@ df_entries['Pagenumber'] = df_entries['Pagenumber'].astype('object')
 # Convert the pdf into images for iterating
 pages = convert_from_path(WORKING_DIRECTORY + '\\' + JUDGING_PDF_FILE, PDF_IMAGE_RESOLUTION, grayscale=True)
 
+def show_selector_box(entry_sticker):
+    # stupid workaround because I can't pass the image as a variable.
+    entry_sticker.save('temp.jpg')
+    choice = eg.enterbox("Input entry number or choose Cancel to skip", image = 'temp.jpg')
+    os.remove('temp.jpg')
+
+    return choice
+
+
 # For each page in the PDF, perform OCR. Update the tracking file to match entry number with page number.
 for i in range(len(pages)):
     this_page = pages[i]
 
     # For each page, crop to where the stickers are, and do OCR.
     entry_sticker = this_page.crop(sticker_pixel_location)
-    entry_text = str(((pytesseract.image_to_string(entry_sticker))))
+    entry_text = str(((pytesseract.image_to_string(entry_sticker, config="-c tessedit_char_whitelist=0123456789MCls- --psm 6"))))
     
     # Try finding the entry number, based on its expected pattern.
-    entry_number = re.findall(r'[MCls\d]\d\-\d\d\d', entry_text)
+    entry_number = re.findall(r'[MCls0-3]\d\-\d{3}', entry_text)
     if entry_number == []:
         # look in the judge sticker location in case the stickers are swapped
         judge_sticker = this_page.crop(judge_pixel_location)
-        judge_text = str(((pytesseract.image_to_string(judge_sticker))))
-        entry_number = re.findall(r'[MCls\d]\d\-\d\d\d', judge_text)
+        judge_text = str(((pytesseract.image_to_string(judge_sticker, config="-c tessedit_char_whitelist=0123456789MCls- --psm 6"))))
+        entry_number = re.findall(r'[MCls0-3]\d\-\d{3}', judge_text)
 
+    # Shouldn't be finding 2 entry numbers. If it does, run a human check.
+    if len(entry_number) != 1:
+        entry_number = [show_selector_box(entry_sticker)]
+        if entry_number[0] is None:
+            continue
+        
     if entry_number != []:
         # If an entry number was found, update the corresponding row in the df and add its page number.
         row = df_entries[df_entries['Judging Number'].str.contains(entry_number[0].upper())]
         # df_entries.loc[row.index[0], 'Renamed'] += 1
 
-        if pd.isna(df_entries.loc[row.index[0], 'Pagenumber']):
+        # If the row number is not found, do a human verification. Might not 
+        # be a valid scoresheet. Maybe a category summary sheet got slipped in.
+        if row.empty:
+            entry_number = [show_selector_box(entry_sticker)]
+            if entry_number[0] is None:
+                continue
+            else:
+                row = df_entries[df_entries['Judging Number'].str.contains(entry_number[0].upper())]
+                # If it's still not found, something's fucky. Skip it. 
+                if row.empty:
+                    continue
+
+        # I'm doing things a weird way, pagenumber will either be nan (float), or a list. So to check for nan check for float.
+        if type(df_entries.loc[row.index[0], 'Pagenumber']) == float:
             df_entries.loc[row.index[0], 'Pagenumber'] = [i]
         else: 
             df_entries.loc[row.index[0], 'Pagenumber'].append(i)
