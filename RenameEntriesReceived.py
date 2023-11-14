@@ -69,15 +69,15 @@ for i in range(len(pages)):
 
     # For each page, crop to where the stickers are, and do OCR.
     entry_sticker = this_page.crop(sticker_pixel_location)
-    entry_text = str(((pytesseract.image_to_string(entry_sticker, config="-c tessedit_char_whitelist=0123456789MCls- --psm 6"))))
+    entry_text = str(((pytesseract.image_to_string(entry_sticker, config="-c tessedit_char_whitelist=0123456789MCLS- --psm 6"))))
     
     # Try finding the entry number, based on its expected pattern.
-    entry_number = re.findall(r'[MCls0-3]\d\-\d{3}', entry_text)
+    entry_number = re.findall(r'[MCLS0-3]\d\-\d{3}', entry_text)
     if entry_number == []:
         # look in the judge sticker location in case the stickers are swapped
         judge_sticker = this_page.crop(judge_pixel_location)
-        judge_text = str(((pytesseract.image_to_string(judge_sticker, config="-c tessedit_char_whitelist=0123456789MCls- --psm 6"))))
-        entry_number = re.findall(r'[MCls0-3]\d\-\d{3}', judge_text)
+        judge_text = str(((pytesseract.image_to_string(judge_sticker, config="-c tessedit_char_whitelist=0123456789MCLS- --psm 6"))))
+        entry_number = re.findall(r'[MCLS0-3]\d\-\d{3}', judge_text)
 
     # Shouldn't be finding 2 entry numbers. If it does, run a human check.
     if len(entry_number) != 1:
@@ -149,37 +149,38 @@ for i in pgs_missing_matches :
 
 
 
-### BELOW THIS POINT SHOULD REALLY BE ITS OWN FILE... 
+# ### BELOW THIS POINT SHOULD REALLY BE ITS OWN FILE... 
 
 
 
 
-# deal with the df_entries file. Flag entries that do not have exactly 2 pages found. 
+# # deal with the df_entries file. Flag entries that do not have exactly 2 pages found. 
 
-# Load the digital evaluations list. Needs to be cleaned up because HTML tables... 
-df_evaluations = pd.read_csv(WORKING_DIRECTORY + '\\' + DIGITAL_EVALUATION_FILE, delimiter=',').dropna(how = 'all').query('`Number` != "Number"').fillna(method = 'pad')
-df_evaluations = df_evaluations[df_evaluations['Notes'].str.contains('Submitted|submitted')]
+# # Load the digital evaluations list. Needs to be cleaned up because HTML tables... 
+# df_evaluations = pd.read_csv(WORKING_DIRECTORY + '\\' + DIGITAL_EVALUATION_FILE, delimiter=',').dropna(how = 'all').query('`Number` != "Number"').fillna(method = 'pad')
+# df_evaluations = df_evaluations[df_evaluations['Notes'].str.contains('Submitted|submitted')]
 
-# add a column for digital evaluations, tally up how many are already in the system. 
-def numSubmitted(row):
-    if re.search('Submitted: (\d)', row['Notes']):
-        return int(re.search('Submitted: (\d)', row['Notes']).group(1))
-    else:
-        return 0
-df_evaluations['Evaluations Submitted'] = df_evaluations.apply(lambda row: numSubmitted(row), axis = 1)
+# # add a column for digital evaluations, tally up how many are already in the system. 
+# def numSubmitted(row):
+#     if re.search('Submitted: (\d)', row['Notes']):
+#         return int(re.search('Submitted: (\d)', row['Notes']).group(1))
+#     else:
+#         return 0
+# df_evaluations['Evaluations Submitted'] = df_evaluations.apply(lambda row: numSubmitted(row), axis = 1)
 
-# left join to put digital evaluations on the entries df. 
-df_entries = df_entries.merge(
-    df_evaluations[['Number', 'Evaluations Submitted']], 
-    left_on = 'Judging Number', right_on = 'Number', how = 'left'
-    )
+# # left join to put digital evaluations on the entries df. 
+# df_entries = df_entries.merge(
+#     df_evaluations[['Number', 'Evaluations Submitted']], 
+#     left_on = 'Judging Number', right_on = 'Number', how = 'left'
+#     )
 
 # tally up number of pages found in ocr, and how many total entries (btwn digita/analog)
 df_entries['Pages Found'] = df_entries['Pagenumber'].str.len()
-df_entries['Total Evaluations'] = df_entries['Pages Found'] + df_entries['Evaluations Submitted']
+# df_entries['Total Evaluations'] = df_entries['Pages Found'] + df_entries['Evaluations Submitted']
 
 # flag entries that don't have exactly 2 evaluations between digital and analog. 
-df_entries[df_entries['Total Evaluations'] != 2].to_csv(WORKING_DIRECTORY + '\\entries_without_2_evaluations.csv', index = False, sep = ',')
+# df_entries[df_entries['Total Evaluations'] != 2].to_csv(WORKING_DIRECTORY + '\\entries_without_2_evaluations.csv', index = False, sep = ',')
 
-df_entries[['Received', 'Judging Number', 'Pagenumber', 'Evaluations Submitted', 'Pages Found', 'Total Evaluations']].to_csv(WORKING_DIRECTORY + '\\' + ENTRY_TRACKING_FILE, index = False, sep = ',')
+df_entries[['Received', 'Judging Number', 'Pagenumber', 'Pages Found']].to_csv(WORKING_DIRECTORY + '\\' + ENTRY_TRACKING_FILE, index = False, sep = ',')
+
         
